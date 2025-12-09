@@ -1,73 +1,97 @@
-<div>Teachable Machine Audio Model</div>
-<button type="button" onclick="init()">Start</button>
-<div id="label-container"></div>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@0.4.0/dist/speech-commands.min.js"></script>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dog Sound Classification Model</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <h1>Dog Sound Classification</h1>
+    <button type="button" onclick="init()">Start Classification</button>
+    <div id="label-container"></div>
 
-<script type="text/javascript">
-    // 1. URL FIX: Removed the incorrect "./" prefix.
-    const URL = "https://teachablemachine.withgoogle.com/models/xKxq3a2NJ/";
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@0.4.0/dist/speech-commands.min.js"></script>
 
-    async function createModel() {
-        const checkpointURL = URL + "model.json"; 
-        const metadataURL = URL + "metadata.json"; 
+    <script type="text/javascript">
+        // 1. Teachable Machine Model URL
+        const URL = "https://teachablemachine.withgoogle.com/models/xKxq3a2NJ/";
+        const CONFIDENCE_THRESHOLD = 0.75; // Only classify if confidence is >= 75%
 
-        const recognizer = speechCommands.create(
-            "BROWSER_FFT", 
-            undefined, 
-            checkpointURL,
-            metadataURL);
+        async function createModel() {
+            const checkpointURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
 
-        await recognizer.ensureModelLoaded();
+            const recognizer = speechCommands.create(
+                "BROWSER_FFT",
+                undefined,
+                checkpointURL,
+                metadataURL
+            );
 
-        return recognizer;
-    }
-
-    async function init() {
-        const recognizer = await createModel();
-        const classLabels = recognizer.wordLabels(); 
-        const labelContainer = document.getElementById("label-container");
-        for (let i = 0; i < classLabels.length; i++) {
-            labelContainer.appendChild(document.createElement("div"));
+            await recognizer.ensureModelLoaded();
+            return recognizer;
         }
 
-        recognizer.listen(result => {
-            const scores = result.scores; 
-            
-            // --- NEW LOGIC: Find the best prediction and send it to App Inventor ---
-            let maxScore = -Infinity;
-            let topClassLabel = '';
-            
-            for (let i = 0; i < scores.length; i++) {
-                // Find the class with the highest score
-                if (scores[i] > maxScore) {
-                    maxScore = scores[i];
-                    topClassLabel = classLabels[i];
-                }
-                
-                // Update the label container on the webpage (for visual feedback)
-                const classPrediction = classLabels[i] + ": " + scores[i].toFixed(2);
-                labelContainer.childNodes[i].innerHTML = classPrediction;
-            }
+        async function init() {
+            const recognizer = await createModel();
+            const classLabels = recognizer.wordLabels();
+            const labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = ''; // Clear existing content
 
-            // 2. CRUCIAL FIX: Send the top classification result back to App Inventor
-            // This triggers the 'when CustomWebView1.WebViewStringChanged value' event!
-            if (window.AppInventor && topClassLabel) {
-                // Only send the result if the probability meets the threshold (0.75)
-                if (maxScore >= 0.75) {
-                    window.AppInventor.setWebViewString(topClassLabel);
-                } else {
-                    // Optionally send a generic label if no classification is confident enough
-                    window.AppInventor.setWebViewString("Background Noise");
-                }
+            // Create divs for all labels
+            for (let i = 0; i < classLabels.length; i++) {
+                labelContainer.appendChild(document.createElement("div"));
             }
-            // --- END NEW LOGIC ---
             
-        }, {
-            includeSpectrogram: true,
-            probabilityThreshold: 0.75, 
-            invokeCallbackOnNoiseAndUnknown: true,
-            overlapFactor: 0.50 
-        });
-    }
-</script>
+            // Disable the Start button and update its text
+            document.querySelector('button').disabled = true;
+            document.querySelector('button').innerText = 'Detection Active...';
+
+            recognizer.listen(result => {
+                const scores = result.scores;
+
+                // --- Find the best prediction and score ---
+                let maxScore = -Infinity;
+                let topClassLabel = '';
+
+                for (let i = 0; i < scores.length; i++) {
+                    // Find the label with the highest score
+                    if (scores[i] > maxScore) {
+                        maxScore = scores[i];
+                        topClassLabel = classLabels[i];
+                    }
+
+                    // Update the visible scores on the web page (optional visual feedback)
+                    const classPrediction = classLabels[i] + ": " + (scores[i] * 100).toFixed(1) + "%";
+                    labelContainer.childNodes[i].innerHTML = classPrediction;
+                }
+
+                // *** CRUCIAL App Inventor Communication ***
+                if (window.AppInventor) {
+                    let resultToSend;
+
+                    // 2. Decide what to send based on confidence and whether it's background noise
+                    if (maxScore >= CONFIDENCE_THRESHOLD && topClassLabel !== '_background_noise_') {
+                        // Send the confident classification (e.g., "Growling", "LoudBarking")
+                        resultToSend = topClassLabel;
+                    } else {
+                        // Send a neutral message if not confident or if it's just background noise
+                        resultToSend = "Background Noise";
+                    }
+
+                    // This function call triggers the `when CustomWebView1 .WebviewStringChanged` block in App Inventor
+                    window.AppInventor.setWebViewString(resultToSend);
+                }
+
+            }, {
+                includeSpectrogram: true,
+                // Set the library's internal threshold low (e.g., 0.01) to ensure we always get scores,
+                // and use our custom JavaScript logic (CONFIDENCE_THRESHOLD) for the final decision.
+                probabilityThreshold: 0.01,
+                invokeCallbackOnNoiseAndUnknown: true,
+                overlapFactor: 0.50
+            });
+        }
+    </script>
+</body>
+</html>
